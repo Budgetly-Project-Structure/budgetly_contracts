@@ -19,8 +19,10 @@ If two repos need to agree on something (the shape of a transaction, what a func
 ```
 schemas/
   data-model.md           Firestore data structure: users, transactions, budgets, uploads
+  categories.md           Category list and the category fields on a transaction
 ai/
   ai-integration-plan.md  AI categorization input/output, confidence, fallback behavior
+  categorization-interface.md  Request/response JSON for the categorization model
 api/                      Cloud Function interfaces: inputs, outputs, error codes (planned)
 ```
 

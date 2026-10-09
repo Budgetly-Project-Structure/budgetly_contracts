@@ -18,9 +18,11 @@
 | date | timestamp | Transaction date |
 | merchant | string | Raw merchant name from statement |
 | amount | number | Negative = spending, positive = income |
-| category | string | e.g. "Dining", "Groceries" |
-| categoryConfidence | number | 0–1, from AI categorization |
+| category | string | A category id, e.g. "dining", "groceries" (list in categories.md) |
+| categoryConfidence | number | null | 0–1; null until something categorizes it (categories.md) |
+| categorySource | string | "none", "rule", "ai", "cache" or "user" (categories.md) |
 | isUserCorrected | boolean | True if user manually changed the category |
+| accountId | string | null | Which of the user's accounts the statement was for |
 | sourceStatementId | string | Reference to the imported statement |
 
 ### Statement
