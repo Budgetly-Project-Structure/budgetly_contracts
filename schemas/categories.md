@@ -54,7 +54,7 @@ Stored on `users/{uid}/transactions/{id}` (see `data-model.md`).
 | Value | Set by | Confidence |
 |---|---|---|
 | `none` | Import, nothing has categorized it yet | `null` |
-| `rule` | Import, a fixed rule matched (e.g. a card payment → `transfers`) | `1` |
+| `rule` | Import, a fixed rule matched: a card payment → `transfers`, or a known merchant from the free keyword list (e.g. STARBUCKS → `dining`) | `1` for card payments, `0.9` for merchant keywords |
 | `ai` | The categorization Cloud Function (SCRUM-71) | what the model returned, 0–1 |
 | `cache` | The merchant cache reused an earlier answer (SCRUM-75) | the cached confidence |
 | `user` | The user picked it on the Transactions page | `1` |
