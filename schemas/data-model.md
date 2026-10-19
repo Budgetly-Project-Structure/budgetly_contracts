@@ -1,14 +1,33 @@
 # Data Model — Financial Planner App
 
+## Where things live in Firestore
+
+Every user's data sits under their own user document, so the security rules
+(`budgetly_backend_nodejs/firestore.rules`) can give each user access to only their own data.
+
+```
+users/{uid}                          User: profile and settings
+users/{uid}/transactions/{id}        Transaction
+users/{uid}/imports/{importId}       Statement (import record)
+users/{uid}/budgets/{categoryId}     Budget: one per category
+```
+
+Raw statement files are in Firebase Storage at `users/{uid}/imports/{timestamp}_{fileName}`.
+
 ## Entities
 
-### User
-| Field | Type | Notes |
-|---|---|---|
-| uid | string | Firebase Auth user ID (document ID) |
-| email | string | |
-| displayName | string | |
-| createdAt | timestamp | |
+### User (profile and settings) — `users/{uid}`
+| Field | Type | Who writes it | Notes |
+|---|---|---|---|
+| uid | string | | Firebase Auth user ID (the document ID, not a field) |
+| email | string | signup | Read-only after signup |
+| displayName | string | signup, Settings | 1–60 characters |
+| createdAt | timestamp | signup | |
+| consentAcceptedAt | timestamp | consent screen | Set once the user accepts the data consent screen |
+| monthlyIncome | number | null | Settings | Dollars per month, 0 to 10,000,000, or null/missing = not set. Used as the budget for a month where no money came in (for example when only a credit card statement is imported). A month with real money in always uses that instead |
+
+Rules: the user can read only their own document, and can change only `displayName`,
+`consentAcceptedAt` and `monthlyIncome`, with the limits above (SCRUM-88).
 
 ### Transaction
 | Field | Type | Notes |
@@ -43,15 +62,19 @@
 | icon | string | Icon identifier for UI |
 | color | string | Hex color for charts/progress bars |
 
-### Budget
+### Budget — `users/{uid}/budgets/{categoryId}`
 | Field | Type | Notes |
 |---|---|---|
-| id | string | Auto-generated document ID |
-| userId | string | Owner reference |
-| categoryId | string | Reference to Category |
-| month | string | e.g. "2026-09" |
-| limit | number | Budget limit for that category/month |
-| spent | number | Running total, updated as transactions come in |
+| categoryId | string | Same as the document ID, e.g. "dining" (one budget per category) |
+| limit | number | Monthly limit in dollars, 0 or more |
+| updatedAt | timestamp | Set on every save |
+
+- A budget is a **monthly** limit that applies to every month: the app compares it with
+  whichever month is being shown. There is no per-month copy and no stored "spent" total;
+  spending is always added up from the transactions, so it can't get out of sync.
+- `income`, `transfers` and `uncategorized` can't have a budget (categories.md).
+- Rules: only the owner can read, create, change or delete their budgets, with exactly
+  these fields (SCRUM-81, SCRUM-88).
 
 ## Relationships
 - One **User** → many **Transactions**, **Statements**, **Budgets**
@@ -59,5 +82,7 @@
 - One **Category** → many **Transactions** and **Budgets**
 
 ## Notes
-- All Firestore documents include a `userId` field so security rules can restrict access to `request.auth.uid == resource.data.userId`
-- Categories can start as a fixed, predefined list rather than user-created, to keep the AI categorization step simpler
+- Access is controlled by the path: everything is under `users/{uid}`, and the rules check
+  `request.auth.uid == uid`. Transactions also carry a `userId` field.
+- Categories are a fixed list (categories.md). Users can add their own `custom-...` categories;
+  those are kept in the browser for now and would move to `users/{uid}/categories/{id}`.
