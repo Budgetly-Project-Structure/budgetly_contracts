@@ -40,7 +40,7 @@ Users can add their own categories (web app: Budget page → "+ New category").
 
 ## Category fields on a transaction
 
-Stored on `users/{uid}/transactions/{id}` (see `data-model.md`).
+Stored on `transactions/{transactionId}` (see `data-model.md`).
 
 | Field | Type | Meaning |
 |---|---|---|
