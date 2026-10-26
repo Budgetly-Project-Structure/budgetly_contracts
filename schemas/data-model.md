@@ -2,14 +2,16 @@
 
 ## Where things live in Firestore
 
-Every user's data sits under their own user document, so the security rules
-(`budgetly_backend_nodejs/firestore.rules`) can give each user access to only their own data.
+Transactions are a top-level collection; every transaction carries a `userId` field and the
+security rules (`budgetly_backend_nodejs/firestore.rules`) check it (SCRUM-109). Everything else
+sits under the user's own document, so the rules check the `{uid}` in the path.
 
 ```
+transactions/{transactionId}         Transaction (owner in the userId field)
 users/{uid}                          User: profile and settings
-users/{uid}/transactions/{id}        Transaction
 users/{uid}/imports/{importId}       Statement (import record)
 users/{uid}/budgets/{categoryId}     Budget: one per category
+users/{uid}/merchantCache/{docId}    Merchant cache (categories.md)
 ```
 
 Raw statement files are in Firebase Storage at `users/{uid}/imports/{timestamp}_{fileName}`.
@@ -29,11 +31,11 @@ Raw statement files are in Firebase Storage at `users/{uid}/imports/{timestamp}_
 Rules: the user can read only their own document, and can change only `displayName`,
 `consentAcceptedAt` and `monthlyIncome`, with the limits above (SCRUM-88).
 
-### Transaction
+### Transaction — `transactions/{transactionId}`
 | Field | Type | Notes |
 |---|---|---|
-| id | string | Auto-generated document ID |
-| userId | string | Owner reference |
+| id | string | The document ID (below), not a field |
+| userId | string | **Required.** The owner's Firebase Auth uid. Set on create from the verified auth token, never from client input. Never changes |
 | date | timestamp | Transaction date |
 | merchant | string | Raw merchant name from statement |
 | amount | number | Negative = spending, positive = income |
@@ -42,7 +44,33 @@ Rules: the user can read only their own document, and can change only `displayNa
 | categorySource | string | "none", "rule", "ai", "cache" or "user" (categories.md) |
 | isUserCorrected | boolean | True if user manually changed the category |
 | accountId | string | null | Which of the user's accounts the statement was for |
-| sourceStatementId | string | Reference to the imported statement |
+| sourceStatementId | string | null | The importId of the statement it came from; null for manual ones |
+| source | string | "import" (written by the import function) or "manual" (added by the user) |
+| deletedAt | timestamp | null | **Required.** Created as null; set when the user deletes it (soft delete) |
+| deletedBy | string | null | uid of whoever deleted it, or null |
+| purgeAfter | timestamp | null | When the server may permanently remove it, or null |
+
+**Document IDs**
+- Imported: `{uid}_{importId}_{rowNumber}` (row number zero-padded to 5 digits), so re-running an
+  import overwrites the same documents instead of duplicating them.
+- Manual: a Firestore auto-generated ID.
+
+**Queries the app runs.** Every client query starts with `where("userId", "==", uid)`, or the
+rules reject it.
+| Screen | Query |
+|---|---|
+| Transactions list | `userId == uid`, `deletedAt == null`, `orderBy("date", "desc")` |
+| One import's transactions | `userId == uid`, `sourceStatementId == importId` |
+| Recently deleted | `userId == uid`, `deletedAt != null` |
+
+Server only (Admin SDK, which skips the rules): the purge job (`purgeAfter <= now`) and the
+admin fraud scan across all users.
+
+**Rules this needs**
+- Read: `resource.data.userId == request.auth.uid`.
+- Create: `request.resource.data.userId == request.auth.uid`.
+- Update: `userId` can't change.
+- Delete: never from the client (soft delete with `deletedAt` instead; the server purges).
 
 ### Statement
 | Field | Type | Notes |
@@ -82,7 +110,7 @@ Rules: the user can read only their own document, and can change only `displayNa
 - One **Category** → many **Transactions** and **Budgets**
 
 ## Notes
-- Access is controlled by the path: everything is under `users/{uid}`, and the rules check
-  `request.auth.uid == uid`. Transactions also carry a `userId` field.
+- Access to transactions is controlled by their `userId` field; everything else is under
+  `users/{uid}`, and the rules check `request.auth.uid == uid`.
 - Categories are a fixed list (categories.md). Users can add their own `custom-...` categories;
   those are kept in the browser for now and would move to `users/{uid}/categories/{id}`.
