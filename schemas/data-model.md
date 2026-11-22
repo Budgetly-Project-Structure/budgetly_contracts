@@ -16,6 +16,38 @@ users/{uid}/merchantCache/{docId}    Merchant cache (categories.md)
 
 Raw statement files are in Firebase Storage at `users/{uid}/imports/{timestamp}_{fileName}`.
 
+## Money is stored in whole cents (Sprint 5)
+
+Every amount of money is saved as an **integer number of cents**, never as a dollar
+number with a decimal point:
+
+| Where | Field | Meaning |
+|---|---|---|
+| Transaction | `amountCents` | Integer. Negative = money out (spending), positive = money in. $12.34 spent = `-1234` |
+| Budget | `limitCents` | Integer, 0 or more. A $250 monthly limit = `25000` |
+
+**Converting.** On the way in, `cents = Math.round(dollars * 100)`: a number a user types,
+or a statement amount when it can't be read straight from the text. The import reads
+statement text like `"1,234.56"` or `"(45.00)"` directly into cents (`123456`, `-4500`),
+without going through a dollar number at all. Everything is added up, compared and stored in
+cents. Dollars exist **only for display**: `(cents / 100)` formatted as currency right before
+it's shown.
+
+**Why.** Computers store numbers with decimals in binary, and most decimal fractions,
+like 0.1, can't be stored exactly. In JavaScript `0.1 + 0.2` is `0.30000000000000004`, not
+`0.3`. Adding up hundreds of transactions in dollars piles up these tiny errors, so totals
+can be off by a cent, `===` comparisons fail (the duplicate check compares amounts), and a
+budget can look over or under by $0.01. Integers are exact: `10 + 20 === 30` always, so
+sums and comparisons in cents never drift.
+
+**Deprecated, removed after the migration.** The old dollar fields, transaction `amount`
+and budget `limit`, are **deprecated**. Until the web app reads cents (Sprint 5 #5/#7), the
+import keeps writing `amount` (= `amountCents / 100`) next to `amountCents`, so the live
+app doesn't break. Nothing new should read them. Sprint 5 #8 migrates existing documents to
+cents and then removes both fields (and the security rules for them).
+
+`users/{uid}.monthlyIncome` is still dollars; it isn't part of this change.
+
 ## Entities
 
 ### User (profile and settings) — `users/{uid}`
@@ -38,7 +70,8 @@ Rules: the user can read only their own document, and can change only `displayNa
 | userId | string | **Required.** The owner's Firebase Auth uid. Set on create from the verified auth token, never from client input. Never changes |
 | date | timestamp | Transaction date |
 | merchant | string | Raw merchant name from statement |
-| amount | number | Negative = spending, positive = income |
+| amountCents | integer | **Money in cents.** Negative = spending, positive = income (see "Money is stored in whole cents") |
+| amount | number | **Deprecated.** Dollars, `amountCents / 100`. Still written until the web app reads cents; removed by the migration (#8) |
 | category | string | A category id, e.g. "dining", "groceries" (list in categories.md) |
 | categoryConfidence | number | null | 0–1; null until something categorizes it (categories.md) |
 | categorySource | string | "none", "rule", "ai", "cache" or "user" (categories.md) |
@@ -111,7 +144,8 @@ Older records may still have `transactionCount`, `fileName`, `fileType` and `acc
 | Field | Type | Notes |
 |---|---|---|
 | categoryId | string | Same as the document ID, e.g. "dining" (one budget per category) |
-| limit | number | Monthly limit in dollars, 0 or more |
+| limitCents | integer | **Monthly limit in cents**, 0 or more (`25000` = $250) |
+| limit | number | **Deprecated.** Monthly limit in dollars. Removed by the migration (#8) |
 | updatedAt | timestamp | Set on every save |
 
 - A budget is a **monthly** limit that applies to every month: the app compares it with

@@ -41,7 +41,7 @@ One request per batch of **at most 50 transactions** (SCRUM-74 splits larger imp
 | `categories` | The "AI can assign" categories from `schemas/categories.md`. Never `uncategorized`, never custom categories |
 | `transactions[].id` | A short id **for this request only** (`t1`, `t2`, ...), not the Firestore id, so no real ids leave the backend |
 | `transactions[].merchant` | Raw description from the statement, already masked (no account numbers) |
-| `transactions[].amount` | Dollars. Negative = money out, positive = money in |
+| `transactions[].amount` | Dollars, worked out from the transaction's `amountCents` (`amountCents / 100`) just for the model. Negative = money out, positive = money in. The model sees dollars because that's how statements read; nothing it sends back is an amount |
 | `transactions[].date` | `YYYY-MM-DD` |
 
 Nothing else is sent: no user id, name, email, account numbers or balances.
@@ -82,6 +82,6 @@ Valid results are saved as `{ category, categoryConfidence: confidence, category
 ## Sign check
 
 The model sees the amount, but the function also checks one thing itself: `income` is only
-accepted for money in (`amount > 0`). An `income` answer for money out falls back to
+accepted for money in (`amountCents > 0`). An `income` answer for money out falls back to
 Uncategorized. Spending categories are accepted either way, because a positive amount in a
 spending category is a refund.
