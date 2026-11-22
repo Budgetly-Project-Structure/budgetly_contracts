@@ -72,15 +72,32 @@ admin fraud scan across all users.
 - Update: `userId` can't change.
 - Delete: never from the client (soft delete with `deletedAt` instead; the server purges).
 
-### Statement
+### Statement (import record) — `users/{uid}/imports/{importId}`
+Written only by the server (the `onStatementUploaded` Cloud Function and the delete/restore
+functions); the app can only read it.
+
 | Field | Type | Notes |
 |---|---|---|
-| id | string | Auto-generated document ID |
-| userId | string | Owner reference |
+| id | string | Hash of the upload (the document ID, not a field); the owner is the `{uid}` in the path |
+| storagePath | string | `users/{uid}/imports/{timestamp}_{fileName}`. The file name and type (csv/pdf) are read from this |
+| accountId | string | null | Which account the statement is for: the one picked, or the one detected |
+| detectedAccountType | string | null | "checking" or "credit": what the file looked like (null = couldn't tell) |
+| sizeBytes | number | File size |
+| status | string | "uploaded", "processing", "completed", "failed" |
+| skippedRowCount | number | Rows that couldn't be read |
+| duplicateRowCount | number | Rows an earlier statement already saved, so they were skipped |
+| rowErrors | array | `[{ row, reason }]` for skipped rows, at most 100 |
+| error | string | null | Message for the user when status is "failed" |
 | uploadedAt | timestamp | |
-| fileType | string | "csv" or "pdf" |
-| status | string | "processing", "completed", "failed" |
-| transactionCount | number | How many transactions were extracted |
+| deletedAt / deletedBy / purgeAfter | | Soft delete, same as transactions |
+
+**Not stored (Sprint 5, data-duplication-audit.md):** the record doesn't copy what is stored elsewhere.
+- How many transactions it saved: count the transactions with `userId == uid` and
+  `sourceStatementId == importId` (the Import page uses a `count()` query).
+- File name and type: from `storagePath`.
+- Account type: from the account (`accountId`).
+Older records may still have `transactionCount`, `fileName`, `fileType` and `accountType` until
+`functions/scripts/removeImportCopies.js` is run; nothing reads them.
 
 ### Category
 | Field | Type | Notes |
