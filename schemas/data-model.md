@@ -2,12 +2,14 @@
 
 ## Where things live in Firestore
 
-Transactions are a top-level collection; every transaction carries a `userId` field and the
-security rules (`budgetly_backend_nodejs/firestore.rules`) check it (SCRUM-109). Everything else
-sits under the user's own document, so the rules check the `{uid}` in the path.
+Transactions and accounts are top-level collections; every document in them carries a `userId`
+field and the security rules (`budgetly_backend_nodejs/firestore.rules`) check it (SCRUM-109,
+Sprint 5 #17). Everything else sits under the user's own document, so the rules check the
+`{uid}` in the path.
 
 ```
 transactions/{transactionId}         Transaction (owner in the userId field)
+accounts/{accountId}                 Account: a checking account or credit card (owner in the userId field)
 users/{uid}                          User: profile and settings
 users/{uid}/imports/{importId}       Statement (import record)
 users/{uid}/budgets/{categoryId}     Budget: one per category
@@ -76,7 +78,7 @@ Rules: the user can read only their own document, and can change only `displayNa
 | categoryConfidence | number | null | 0–1; null until something categorizes it (categories.md) |
 | categorySource | string | "none", "rule", "ai", "cache" or "user" (categories.md) |
 | isUserCorrected | boolean | True if user manually changed the category |
-| accountId | string | null | Which of the user's accounts the statement was for |
+| accountId | string | null | The account it belongs to (`accounts/{accountId}`), or null. Only the id: type, institution and last 4 digits are read from the account |
 | sourceStatementId | string | null | The importId of the statement it came from; null for manual ones |
 | source | string | "import" (written by the import function) or "manual" (added by the user) |
 | deletedAt | timestamp | null | **Required.** Created as null; set when the user deletes it (soft delete) |
@@ -113,7 +115,7 @@ functions); the app can only read it.
 |---|---|---|
 | id | string | Hash of the upload (the document ID, not a field); the owner is the `{uid}` in the path |
 | storagePath | string | `users/{uid}/imports/{timestamp}_{fileName}`. The file name and type (csv/pdf) are read from this |
-| accountId | string | null | Which account the statement is for: the one picked, or the one detected |
+| accountId | string | null | The account the statement is for (`accounts/{accountId}`): the one picked, or the one detected. Only the id |
 | detectedAccountType | string | null | "checking" or "credit": what the file looked like (null = couldn't tell) |
 | sizeBytes | number | File size |
 | status | string | "uploaded", "processing", "completed", "failed" |
@@ -131,6 +133,55 @@ functions); the app can only read it.
 - Account type: from the account (`accountId`).
 Older records may still have `transactionCount`, `fileName`, `fileType` and `accountType` until
 `functions/scripts/removeImportCopies.js` is run; nothing reads them.
+
+### Account — `accounts/{accountId}` (Sprint 5 #17)
+
+One document per bank account or credit card a user has. Today the app has two accounts built
+into the code (`acct-checking`, `acct-credit` in the web app's `mockData.js` and the backend's
+`accountType.js`); this is where real, per-user accounts will live instead.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | string | Firestore auto-generated ID (the document ID, not a field). Never contains the account number |
+| userId | string | **Required.** The owner's Firebase Auth uid. Set on create from the verified auth token, never from client input. Never changes |
+| type | string | `"checking"` or `"credit"` |
+| institution | string | The bank or card company as the user knows it, e.g. "Chase", 1–60 characters |
+| last4 | string | null | Last 4 digits of the account number, exactly 4 digits, shown as •••• 4521. **Never the full number** |
+| nickname | string | null | The user's own name for it, e.g. "Joint checking", up to 40 characters |
+| createdAt | timestamp | Set on create |
+| updatedAt | timestamp | Set on every change |
+| deletedAt | timestamp | null | **Required.** Created as null; set when the user deletes it (soft delete) |
+| deletedBy | string | null | uid of whoever deleted it, or null |
+| purgeAfter | timestamp | null | When the daily job may move it to the archive, or null |
+
+**Only the account document describes the account.** Transactions and statements store just its
+`accountId`; the type, institution, last 4 digits and nickname are read from here, never copied
+(data-duplication-audit.md, D4). The import's `detectedAccountType` is what the file *looked*
+like, not a copy of `type`.
+
+**Queries the app runs.**
+| Screen | Query |
+|---|---|
+| Account list (Settings, Import picker, filters) | `userId == uid`, `deletedAt == null` |
+
+**Rules this needs** (same pattern as transactions)
+- Read: `resource.data.userId == request.auth.uid`; a list query must include
+  `where("userId", "==", <own uid>)`.
+- Create: `request.resource.data.userId == request.auth.uid`, only the fields above, `type` is
+  `"checking"` or `"credit"`, `last4` is null or exactly 4 digits, `deletedAt == null`.
+- Update: the owner may change `institution`, `last4`, `nickname` and `updatedAt`. `userId`
+  and `type` never change (a different kind of account is a new account).
+- Delete: never from the client. Deleting is a soft delete (set or clear only `deletedAt`,
+  `deletedBy`, `purgeAfter`, the same as budgets); the daily job archives it after 30 days
+  (`archive_accounts`, admin-only like the other archive collections).
+- A soft-deleted account's transactions and statements stay as they are and keep the
+  `accountId`; the app shows them as "Deleted account".
+
+**Moving from the built-in accounts.** Existing transactions and statements use the ids
+`acct-checking` and `acct-credit`. When per-user accounts ship, a one-time script creates each
+user's two accounts as `accounts/{uid}_checking` and `accounts/{uid}_credit` (the only
+non-random ids, so the script can be run again safely) and rewrites `accountId` on that user's
+transactions and statements to match.
 
 ### Category
 | Field | Type | Notes |
@@ -156,12 +207,13 @@ Older records may still have `transactionCount`, `fileName`, `fileType` and `acc
   these fields (SCRUM-81, SCRUM-88).
 
 ## Relationships
-- One **User** → many **Transactions**, **Statements**, **Budgets**
+- One **User** → many **Accounts**, **Transactions**, **Statements**, **Budgets**
+- One **Account** → many **Transactions** and **Statements** (by `accountId`)
 - One **Statement** → many **Transactions** (the ones extracted from it)
 - One **Category** → many **Transactions** and **Budgets**
 
 ## Notes
-- Access to transactions is controlled by their `userId` field; everything else is under
-  `users/{uid}`, and the rules check `request.auth.uid == uid`.
+- Access to transactions and accounts is controlled by their `userId` field; everything else is
+  under `users/{uid}`, and the rules check `request.auth.uid == uid`.
 - Categories are a fixed list (categories.md). Users can add their own `custom-...` categories;
   those are kept in the browser for now and would move to `users/{uid}/categories/{id}`.
