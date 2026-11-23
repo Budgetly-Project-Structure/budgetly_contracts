@@ -56,11 +56,13 @@ cents and then removes both fields (and the security rules for them).
 | Field | Type | Who writes it | Notes |
 |---|---|---|---|
 | uid | string | | Firebase Auth user ID (the document ID, not a field) |
-| email | string | signup | Read-only after signup |
-| displayName | string | signup, Settings | 1–60 characters |
+| displayName | string | signup, Settings | 1–60 characters. Saved only here, not in the Firebase Auth profile |
 | createdAt | timestamp | signup | |
 | consentAcceptedAt | timestamp | consent screen | Set once the user accepts the data consent screen |
 | monthlyIncome | number | null | Settings | Dollars per month, 0 to 10,000,000, or null/missing = not set. Used as the budget for a month where no money came in (for example when only a credit card statement is imported). A month with real money in always uses that instead |
+
+The email isn't saved here: it lives in Firebase Auth, which is where it's read from (SCRUM-146).
+Older documents may still have an `email` field; nothing reads it.
 
 Rules: the user can read only their own document, and can change only `displayName`,
 `consentAcceptedAt` and `monthlyIncome`, with the limits above (SCRUM-88).
@@ -77,7 +79,7 @@ Rules: the user can read only their own document, and can change only `displayNa
 | category | string | A category id, e.g. "dining", "groceries" (list in categories.md) |
 | categoryConfidence | number | null | 0–1; null until something categorizes it (categories.md) |
 | categorySource | string | "none", "rule", "ai", "cache" or "user" (categories.md) |
-| isUserCorrected | boolean | True if user manually changed the category |
+| isUserCorrected | boolean | **Removed (SCRUM-146).** Same as `categorySource == "user"`, which is the source of truth. Older documents may still have it; nothing reads it |
 | accountId | string | null | The account it belongs to (`accounts/{accountId}`), or null. Only the id: type, institution and last 4 digits are read from the account |
 | sourceStatementId | string | null | The importId of the statement it came from; null for manual ones |
 | source | string | "import" (written by the import function) or "manual" (added by the user) |
@@ -194,7 +196,7 @@ transactions and statements to match.
 ### Budget — `users/{uid}/budgets/{categoryId}`
 | Field | Type | Notes |
 |---|---|---|
-| categoryId | string | Same as the document ID, e.g. "dining" (one budget per category) |
+| categoryId | string | **Removed (SCRUM-146).** The document ID is the category, e.g. "dining" (one budget per category). Older documents may still have it and, if so, it matches the ID |
 | limitCents | integer | **Monthly limit in cents**, 0 or more (`25000` = $250) |
 | limit | number | **Deprecated.** Monthly limit in dollars. Removed by the migration (#8) |
 | updatedAt | timestamp | Set on every save |
@@ -203,6 +205,8 @@ transactions and statements to match.
   whichever month is being shown. There is no per-month copy and no stored "spent" total;
   spending is always added up from the transactions, so it can't get out of sync.
 - `income`, `transfers` and `uncategorized` can't have a budget (categories.md).
+- The document ID is the only place the category is saved. Likewise, a monthly budget record
+  `users/{uid}/budgetMonths/{YYYY-MM}` has no `month` field: its ID is the month (SCRUM-146).
 - Rules: only the owner can read, create, change or delete their budgets, with exactly
   these fields (SCRUM-81, SCRUM-88).
 
